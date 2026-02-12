@@ -1,0 +1,38 @@
+[
+  {
+    "title": "Train FFWM on MrBeast viral guidelines",
+    "agent": "ffwm",
+    "status": "done",
+    "createdAt": "2026-02-12T12:17:00Z"
+  },
+  {
+    "title": "Create/organize Discord sub-agent channels",
+    "agent": "main",
+    "status": "done",
+    "createdAt": "2026-02-12T12:25:00Z"
+  },
+  {
+    "title": "Route Shield channel and keep main as primary",
+    "agent": "shield",
+    "status": "done",
+    "createdAt": "2026-02-12T12:26:00Z"
+  },
+  {
+    "title": "Add emoji naming to habits and trading channels",
+    "agent": "main",
+    "status": "done",
+    "createdAt": "2026-02-12T12:26:30Z"
+  },
+  {
+    "title": "Set up first task dashboard UI",
+    "agent": "main",
+    "status": "done",
+    "createdAt": "2026-02-12T12:39:00Z"
+  },
+  {
+    "title": "Auto-sync dashboard from live OpenClaw events",
+    "agent": "shield",
+    "status": "todo",
+    "createdAt": "2026-02-12T12:41:00Z"
+  }
+]

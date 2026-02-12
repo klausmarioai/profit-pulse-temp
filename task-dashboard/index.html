@@ -41,8 +41,10 @@
         <option value="qa">qa</option>
       </select>
       <button onclick="addTask()">Add Task</button>
+      <button onclick="syncFromSnapshot()">Sync Snapshot</button>
       <button onclick="exportTasks()">Export JSON</button>
       <input id="import" type="file" accept="application/json" onchange="importTasks(event)" />
+      <span id="syncStatus" class="pill">local only</span>
     </div>
 
     <div class="board">
@@ -62,6 +64,7 @@ const seed = [
 
 let tasks = load();
 render();
+syncFromSnapshot(true);
 
 function load(){
   try {
@@ -82,6 +85,38 @@ function addTask(){
 
 function setStatus(id, status){ tasks = tasks.map(t => t.id===id ? {...t, status} : t); save(); render(); }
 function removeTask(id){ tasks = tasks.filter(t=>t.id!==id); save(); render(); }
+
+async function syncFromSnapshot(silent=false){
+  const el = document.getElementById('syncStatus');
+  try {
+    const res = await fetch(`tasks-live.json?t=${Date.now()}`);
+    if(!res.ok) throw new Error('No snapshot found');
+    const incoming = await res.json();
+    if(!Array.isArray(incoming)) throw new Error('Bad snapshot format');
+
+    const existingKeys = new Set(tasks.map(t => `${t.title}::${t.agent}`));
+    let added = 0;
+    for(const t of incoming){
+      const key = `${t.title}::${t.agent}`;
+      if(!existingKeys.has(key)){
+        tasks.unshift({
+          id: crypto.randomUUID(),
+          title: t.title,
+          agent: t.agent || 'main',
+          status: t.status || 'todo',
+          createdAt: t.createdAt || new Date().toISOString()
+        });
+        existingKeys.add(key);
+        added++;
+      }
+    }
+    save(); render();
+    el.textContent = `snapshot synced (+${added})`;
+  } catch(err){
+    if(!silent) alert('Could not sync snapshot. Make sure tasks-live.json exists.');
+    el.textContent = 'snapshot unavailable';
+  }
+}
 
 function fmtDate(iso){ return new Date(iso).toLocaleString(); }
 
