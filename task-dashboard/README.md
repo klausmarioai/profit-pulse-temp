@@ -2,13 +2,12 @@
 
 Simple local kanban board to track tasks across sub-agents.
 
-## Open it
-- Double-click `index.html`
-
-## Optional (serve via local URL)
+## Open it (real-time mode)
 From this folder:
-- `python -m http.server 8787`
+- `node server.js`
 Then open: `http://127.0.0.1:8787`
+
+(You can still double-click `index.html`, but live auto-sync needs the server.)
 
 ## Notes
 - Data is stored in browser localStorage (`klaus.tasks.v1`)

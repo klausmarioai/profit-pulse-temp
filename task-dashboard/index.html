@@ -41,7 +41,7 @@
         <option value="qa">qa</option>
       </select>
       <button onclick="addTask()">Add Task</button>
-      <button onclick="syncFromSnapshot()">Sync Snapshot</button>
+      <button onclick="fetchLiveNow()">Sync Now</button>
       <button onclick="exportTasks()">Export JSON</button>
       <input id="import" type="file" accept="application/json" onchange="importTasks(event)" />
       <span id="syncStatus" class="pill">local only</span>
@@ -51,6 +51,11 @@
       <div class="col todo"><h3>To Do</h3><div id="todo"></div></div>
       <div class="col doing"><h3>In Progress</h3><div id="doing"></div></div>
       <div class="col done"><h3>Done</h3><div id="done"></div></div>
+    </div>
+
+    <div class="col" style="margin-top:12px; min-height:120px;">
+      <h3>Live Agent Activity</h3>
+      <div id="liveFeed" class="meta">Waiting for live stream...</div>
     </div>
   </div>
 
@@ -64,7 +69,7 @@ const seed = [
 
 let tasks = load();
 render();
-syncFromSnapshot(true);
+connectLive();
 
 function load(){
   try {
@@ -86,36 +91,67 @@ function addTask(){
 function setStatus(id, status){ tasks = tasks.map(t => t.id===id ? {...t, status} : t); save(); render(); }
 function removeTask(id){ tasks = tasks.filter(t=>t.id!==id); save(); render(); }
 
-async function syncFromSnapshot(silent=false){
+async function fetchLiveNow(){
   const el = document.getElementById('syncStatus');
   try {
-    const res = await fetch(`tasks-live.json?t=${Date.now()}`);
-    if(!res.ok) throw new Error('No snapshot found');
-    const incoming = await res.json();
-    if(!Array.isArray(incoming)) throw new Error('Bad snapshot format');
-
-    const existingKeys = new Set(tasks.map(t => `${t.title}::${t.agent}`));
-    let added = 0;
-    for(const t of incoming){
-      const key = `${t.title}::${t.agent}`;
-      if(!existingKeys.has(key)){
-        tasks.unshift({
-          id: crypto.randomUUID(),
-          title: t.title,
-          agent: t.agent || 'main',
-          status: t.status || 'todo',
-          createdAt: t.createdAt || new Date().toISOString()
-        });
-        existingKeys.add(key);
-        added++;
-      }
-    }
-    save(); render();
-    el.textContent = `snapshot synced (+${added})`;
-  } catch(err){
-    if(!silent) alert('Could not sync snapshot. Make sure tasks-live.json exists.');
-    el.textContent = 'snapshot unavailable';
+    const res = await fetch(`/api/live?t=${Date.now()}`);
+    if(!res.ok) throw new Error('live api unavailable');
+    const payload = await res.json();
+    const added = applyLiveTasks(payload.tasks || []);
+    renderLiveFeed(payload.sessions || []);
+    el.textContent = `live synced (+${added})`;
+  } catch {
+    el.textContent = 'live unavailable';
   }
+}
+
+function connectLive(){
+  const el = document.getElementById('syncStatus');
+  fetchLiveNow();
+  try {
+    const es = new EventSource('/events');
+    es.onmessage = (evt) => {
+      try {
+        const payload = JSON.parse(evt.data);
+        const added = applyLiveTasks(payload.tasks || []);
+        renderLiveFeed(payload.sessions || []);
+        el.textContent = `live auto-sync on (+${added})`;
+      } catch {}
+    };
+    es.onerror = () => { el.textContent = 'live reconnecting...'; };
+  } catch {
+    el.textContent = 'live stream unsupported';
+  }
+}
+
+function applyLiveTasks(incoming){
+  const existingKeys = new Set(tasks.map(t => `${t.title}::${t.agent}`));
+  let added = 0;
+  for(const t of incoming){
+    const key = `${t.title}::${t.agent}`;
+    if(!existingKeys.has(key)){
+      tasks.unshift({
+        id: crypto.randomUUID(),
+        title: t.title,
+        agent: t.agent || 'main',
+        status: t.status || 'todo',
+        createdAt: t.createdAt || new Date().toISOString()
+      });
+      existingKeys.add(key);
+      added++;
+    }
+  }
+  if(added){ save(); render(); }
+  return added;
+}
+
+function renderLiveFeed(sessions){
+  const feed = document.getElementById('liveFeed');
+  if(!sessions.length){ feed.textContent = 'No recent sessions.'; return; }
+  feed.innerHTML = sessions.slice(0,8).map(s => {
+    const mins = Math.max(0, Math.round((s.ageMs||0)/60000));
+    return `• <span class="pill">${escapeHtml(s.key)}</span> ${escapeHtml(s.model||'')} · ${mins}m ago`;
+  }).join('<br/>');
 }
 
 function fmtDate(iso){ return new Date(iso).toLocaleString(); }
