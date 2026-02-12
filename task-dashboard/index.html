@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Klaus Task Dashboard</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121a31; --muted:#9fb0d4; --text:#edf2ff; --todo:#5b8cff; --doing:#f5a524; --done:#2fbf71; }
+    body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { padding:20px; max-width:1200px; margin:0 auto; }
+    h1 { margin:0 0 6px; font-size:26px; }
+    .sub { color:var(--muted); margin-bottom:16px; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    input, select, button { border-radius:10px; border:1px solid #2a355f; background:#0f1730; color:var(--text); padding:10px; }
+    button { cursor:pointer; }
+    .board { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .col { background:var(--card); border:1px solid #243058; border-radius:14px; padding:12px; min-height:380px; }
+    .col h3 { margin:0 0 10px; font-size:16px; }
+    .todo h3{ color:var(--todo)} .doing h3{ color:var(--doing)} .done h3{ color:var(--done)}
+    .task { background:#0f1730; border:1px solid #2a355f; border-radius:12px; padding:10px; margin-bottom:10px; }
+    .title { font-weight:600; margin-bottom:5px; }
+    .meta { color:var(--muted); font-size:12px; margin-bottom:7px; }
+    .row { display:flex; gap:6px; flex-wrap:wrap; }
+    .tiny { font-size:12px; padding:6px 8px; }
+    .pill { font-size:11px; border:1px solid #33406d; border-radius:999px; padding:2px 8px; color:#c7d4f7; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🐙 Klaus Task Dashboard</h1>
+    <div class="sub">Track what we’re building across your sub-agents.</div>
+
+    <div class="toolbar">
+      <input id="title" placeholder="New task title" style="min-width:260px" />
+      <select id="agent">
+        <option value="main">main</option>
+        <option value="shield">shield</option>
+        <option value="habit">habit</option>
+        <option value="trading">trading</option>
+        <option value="ffwm">ffwm</option>
+        <option value="qa">qa</option>
+      </select>
+      <button onclick="addTask()">Add Task</button>
+      <button onclick="exportTasks()">Export JSON</button>
+      <input id="import" type="file" accept="application/json" onchange="importTasks(event)" />
+    </div>
+
+    <div class="board">
+      <div class="col todo"><h3>To Do</h3><div id="todo"></div></div>
+      <div class="col doing"><h3>In Progress</h3><div id="doing"></div></div>
+      <div class="col done"><h3>Done</h3><div id="done"></div></div>
+    </div>
+  </div>
+
+<script>
+const KEY = 'klaus.tasks.v1';
+const seed = [
+  { id: crypto.randomUUID(), title:'Train FFWM on viral playbook', agent:'ffwm', status:'done', createdAt:new Date().toISOString() },
+  { id: crypto.randomUUID(), title:'Create Discord channels for sub-agents', agent:'main', status:'done', createdAt:new Date().toISOString() },
+  { id: crypto.randomUUID(), title:'Bind FFWM/QA/Shield to their Discord channels', agent:'shield', status:'in-progress', createdAt:new Date().toISOString() }
+];
+
+let tasks = load();
+render();
+
+function load(){
+  try {
+    const raw = localStorage.getItem(KEY);
+    return raw ? JSON.parse(raw) : seed;
+  } catch { return seed; }
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(tasks)); }
+
+function addTask(){
+  const title = document.getElementById('title').value.trim();
+  const agent = document.getElementById('agent').value;
+  if(!title) return;
+  tasks.unshift({ id: crypto.randomUUID(), title, agent, status:'todo', createdAt:new Date().toISOString() });
+  document.getElementById('title').value='';
+  save(); render();
+}
+
+function setStatus(id, status){ tasks = tasks.map(t => t.id===id ? {...t, status} : t); save(); render(); }
+function removeTask(id){ tasks = tasks.filter(t=>t.id!==id); save(); render(); }
+
+function fmtDate(iso){ return new Date(iso).toLocaleString(); }
+
+function taskCard(t){
+  return `<div class="task">
+      <div class="title">${escapeHtml(t.title)}</div>
+      <div class="meta"><span class="pill">${t.agent}</span> · ${fmtDate(t.createdAt)}</div>
+      <div class="row">
+        ${t.status!=='todo' ? `<button class='tiny' onclick="setStatus('${t.id}','todo')">To Do</button>`:''}
+        ${t.status!=='in-progress' ? `<button class='tiny' onclick="setStatus('${t.id}','in-progress')">In Progress</button>`:''}
+        ${t.status!=='done' ? `<button class='tiny' onclick="setStatus('${t.id}','done')">Done</button>`:''}
+        <button class='tiny' onclick="removeTask('${t.id}')">Delete</button>
+      </div>
+    </div>`;
+}
+
+function render(){
+  document.getElementById('todo').innerHTML = tasks.filter(t=>t.status==='todo').map(taskCard).join('');
+  document.getElementById('doing').innerHTML = tasks.filter(t=>t.status==='in-progress').map(taskCard).join('');
+  document.getElementById('done').innerHTML = tasks.filter(t=>t.status==='done').map(taskCard).join('');
+}
+
+function exportTasks(){
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'klaus-tasks.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importTasks(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try { tasks = JSON.parse(fr.result); save(); render(); }
+    catch { alert('Invalid JSON file'); }
+  };
+  fr.readAsText(file);
+}
+
+function escapeHtml(s){ return s.replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+</script>
+</body>
+</html>
