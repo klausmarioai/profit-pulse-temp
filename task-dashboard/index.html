@@ -100,6 +100,7 @@
       </select>
       <button onclick="addTask()">Add</button>
       <button onclick="fetchLiveNow()">Sync</button>
+      <button onclick="publishLiveNow()">Publish</button>
       <button onclick="exportTasks()">Export</button>
       <input id="import" type="file" accept="application/json" onchange="importTasks(event)" />
     </div>
@@ -145,7 +146,8 @@
             1) Put active work in <b>Now</b><br/>
             2) Keep the next queue in <b>Next</b><br/>
             3) Anything waiting on credits/approval goes to <b>Blocked</b><br/>
-            4) Keep cards short and outcome-focused
+            4) Keep cards short and outcome-focused<br/>
+            5) Hit <b>Publish</b> to save current board to <code>tasks-live.json</code>
           </div>
         </div>
       </div>
@@ -196,6 +198,13 @@ function mapAgentToProject(a){
   if(a==='qa') return 'qa-career';
   if(a==='shield') return 'ops';
   return 'app';
+}
+function mapProjectToAgent(p){
+  if(p==='website') return 'ffwm';
+  if(p==='habits') return 'habit';
+  if(p==='qa-career') return 'qa';
+  if(p==='ops') return 'shield';
+  return 'main';
 }
 
 function addTask(){
@@ -327,6 +336,30 @@ async function fetchLiveNow(){
     el.textContent = `live synced (+${added})`;
   }catch{
     el.textContent = 'live unavailable';
+  }
+}
+
+async function publishLiveNow(){
+  const el = document.getElementById('syncStatus');
+  try{
+    const payload = tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      agent: mapProjectToAgent(t.project),
+      status: t.status === 'doing' ? 'in-progress' : t.status,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    }));
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks: payload })
+    });
+    if(!res.ok) throw new Error();
+    const out = await res.json();
+    el.textContent = `published (${out.count||0})`;
+  }catch{
+    el.textContent = 'publish failed';
   }
 }
 
