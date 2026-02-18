@@ -1,15 +1,16 @@
 import Layout from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mockFinancials } from "@/lib/mock-data";
+import { buildWeeklyActions, getDataCompletenessWarnings, type AuditData } from "@/lib/audit-derived";
 import { DollarSign, Wallet, TrendingUp, PiggyBank, Info, CheckCircle, Zap, AlertTriangle } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Button } from "@/components/ui/button";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function DashboardPage() {
-  const [auditData, setAuditData] = useState<any>(null);
+  const [auditData, setAuditData] = useState<AuditData | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("profitPulseAudit");
@@ -18,7 +19,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Merge audit data with mock for a full dashboard feel
   const currentSummary = auditData ? {
     ...mockFinancials.summary,
     revenue: typeof auditData.revenue === 'number' ? auditData.revenue : mockFinancials.summary.revenue,
@@ -28,10 +28,13 @@ export default function DashboardPage() {
     runway: typeof auditData.runway === 'number' ? auditData.runway : mockFinancials.summary.runway
   } : mockFinancials.summary;
 
-  const currentLeaks = (auditData && auditData.leaks) ? auditData.leaks : mockFinancials.leaks;
+  const currentLeaks = (auditData && auditData.leaks?.length) ? auditData.leaks : mockFinancials.leaks;
   const currentHistory = (auditData && Array.isArray(auditData.history) && auditData.history.length > 0)
     ? auditData.history
     : mockFinancials.history;
+
+  const weeklyActions = useMemo(() => buildWeeklyActions(auditData), [auditData]);
+  const completenessWarnings = useMemo(() => getDataCompletenessWarnings(auditData), [auditData]);
   const totalSavings = currentLeaks.reduce((acc: number, leak: any) => acc + (leak.impact || 0), 0);
 
   return (
@@ -52,19 +55,22 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 text-sm font-medium bg-secondary px-3 py-1 rounded-full text-muted-foreground">Audit Complete</div>
         </div>
 
-        {auditData?.warning && (
+        {completenessWarnings.length > 0 && (
           <Card className="border-amber-300 bg-amber-50/70 dark:bg-amber-950/20 dark:border-amber-800">
             <CardContent className="p-4 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 mt-0.5 text-amber-600" />
               <div>
                 <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Data completeness warning</p>
-                <p className="text-xs text-amber-700 dark:text-amber-400">{auditData.warning}</p>
+                <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                  {completenessWarnings.map((warning) => (
+                    <li key={warning} className="text-xs text-amber-700 dark:text-amber-400">{warning}</li>
+                  ))}
+                </ul>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* AUDIT RESULTS */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold font-heading flex items-center gap-2 text-primary">
@@ -88,7 +94,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <Badge variant={leak.confidence === "High" ? "default" : "secondary"} className="text-[9px] uppercase tracking-tighter">
-                      {leak.confidence} Conf.
+                      {leak.confidence || "Est."} Conf.
                     </Badge>
                   </div>
                   <div className="space-y-1">
@@ -136,8 +142,8 @@ export default function DashboardPage() {
           <Card className="border-primary/20 bg-primary/5">
             <CardHeader><CardTitle className="text-lg font-bold">Fix this week</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              {mockFinancials.weeklyActions.map((action, i) => (
-                <div key={i} className="flex gap-3 p-3 bg-card border border-border/50 rounded-lg shadow-sm">
+              {weeklyActions.map((action, i) => (
+                <div key={`${action.task}-${i}`} className="flex gap-3 p-3 bg-card border border-border/50 rounded-lg shadow-sm">
                   <div className="w-5 h-5 mt-0.5 rounded-full border border-primary/30 flex items-center justify-center shrink-0">
                     <CheckCircle className="w-3 h-3 text-primary/30" />
                   </div>
