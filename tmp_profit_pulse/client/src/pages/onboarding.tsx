@@ -212,61 +212,74 @@ export default function OnboardingPage() {
     let totalRevenue = 0;
     let totalExpenses = 0;
 
-    parsedData.forEach(row => {
-      const parseMoney = (val: any) => {
-        const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
-        return Number.isFinite(n) ? n : 0;
-      };
+    const parseMoney = (val: any) => {
+      const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    };
 
+    const inferCategory = (row: any) => {
+      return row[mappings.category] || row[mappings.description] || "Uncategorized";
+    };
+
+    const classifyTransaction = (row: any) => {
       let amt = 0;
+      let credit = 0;
+      let debit = 0;
+
       if (hasAmount) {
         amt = parseMoney(row[mappings.amount]);
       } else {
-        const credit = parseMoney(row[mappings.credit]);
-        const debit = parseMoney(row[mappings.debit]);
+        credit = parseMoney(row[mappings.credit]);
+        debit = parseMoney(row[mappings.debit]);
         amt = credit - debit;
       }
 
-      if (!Number.isFinite(amt) || amt === 0) return;
+      if (!Number.isFinite(amt) || amt === 0) return { valid: false as const, amt: 0, isExpense: false };
 
-      const cat = row[mappings.category] || 'Uncategorized';
-      const isExpense = amt < 0 || (typeof cat === 'string' && /rent|pay|soft|tax|supply|vendor|utilit/i.test(cat));
+      const cat = String(inferCategory(row) || "").toLowerCase();
+      const desc = String(row[mappings.description] || "").toLowerCase();
+      const text = `${cat} ${desc}`;
 
-      if (isExpense) {
-        const absoluteAmt = Math.abs(amt);
-        totalExpenses += absoluteAmt;
-        expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
+      const incomeHint = /client payment|payout|deposit|income|sale|revenue|invoice paid|received/i.test(text);
+      const expenseHint = /expense|bill|fee|rent|utility|suppl|payroll|tax|insurance|subscription|software|vendor|purchase|withdraw/i.test(text);
+
+      let isExpense = false;
+
+      if (!hasAmount) {
+        // Credit/debit mapping is authoritative when provided
+        if (debit > 0 && credit === 0) isExpense = true;
+        else if (credit > 0 && debit === 0) isExpense = false;
+        else isExpense = amt < 0;
       } else {
-        totalRevenue += amt;
+        // Amount-column exports often encode sign directly; use hints only for positive ambiguous rows
+        if (amt < 0) isExpense = true;
+        else if (incomeHint) isExpense = false;
+        else if (expenseHint) isExpense = true;
+        else isExpense = false;
       }
-    });
+
+      return { valid: true as const, amt, isExpense };
+    };
 
     const categoryRows: Record<string, number[]> = {};
     const totalRows = Math.max(parsedData.length, 1);
 
-    // rebuild per-category row amounts for volatility + recurrence
     parsedData.forEach((row) => {
-      const parseMoney = (val: any) => {
-        const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
-        return Number.isFinite(n) ? n : 0;
-      };
+      const tx = classifyTransaction(row);
+      if (!tx.valid) return;
 
-      const hasAmount = Boolean(mappings.amount);
-      let amt = 0;
-      if (hasAmount) {
-        amt = parseMoney(row[mappings.amount]);
+      const cat = inferCategory(row);
+      const absoluteAmt = Math.abs(tx.amt);
+
+      if (tx.isExpense) {
+        totalExpenses += absoluteAmt;
+        expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
+
+        if (!categoryRows[cat]) categoryRows[cat] = [];
+        categoryRows[cat].push(absoluteAmt);
       } else {
-        const credit = parseMoney(row[mappings.credit]);
-        const debit = parseMoney(row[mappings.debit]);
-        amt = credit - debit;
+        totalRevenue += absoluteAmt;
       }
-
-      if (!Number.isFinite(amt) || amt >= 0) return; // expense rows only
-
-      const cat = row[mappings.category] || "Uncategorized";
-      const absAmt = Math.abs(amt);
-      if (!categoryRows[cat]) categoryRows[cat] = [];
-      categoryRows[cat].push(absAmt);
     });
 
     const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -312,11 +325,15 @@ export default function OnboardingPage() {
       .sort((a, b) => b.impact - a.impact)
       .slice(0, 3);
 
+    const computedMargin = totalRevenue > 0
+      ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100)
+      : 0;
+
     handleFinish({
-      leaks: leaks.length > 0 ? leaks : null,
-      revenue: totalRevenue || 124500,
-      expenses: totalExpenses || 85200,
-      margin: totalRevenue ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100) : 31.5
+      leaks: leaks,
+      revenue: totalRevenue,
+      expenses: totalExpenses,
+      margin: computedMargin
     });
   };
 
