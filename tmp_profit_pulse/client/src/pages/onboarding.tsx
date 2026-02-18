@@ -214,6 +214,7 @@ export default function OnboardingPage() {
     let totalExpenses = 0;
     let revenueRows = 0;
     let expenseRows = 0;
+    const monthlyBuckets: Record<string, { revenue: number; expenses: number; sortKey: number }> = {};
 
     const parseMoney = (val: any) => {
       const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
@@ -222,6 +223,20 @@ export default function OnboardingPage() {
 
     const inferCategory = (row: any) => {
       return row[mappings.category] || row[mappings.description] || "Uncategorized";
+    };
+
+    const getMonthLabel = (row: any) => {
+      const rawDate = row[mappings.date];
+      const d = rawDate ? new Date(rawDate) : null;
+      if (!d || Number.isNaN(d.getTime())) return "Unknown";
+      return d.toLocaleString("en-US", { month: "short" });
+    };
+
+    const getMonthSortKey = (row: any) => {
+      const rawDate = row[mappings.date];
+      const d = rawDate ? new Date(rawDate) : null;
+      if (!d || Number.isNaN(d.getTime())) return Number.MAX_SAFE_INTEGER;
+      return d.getFullYear() * 100 + (d.getMonth() + 1);
     };
 
     const classifyTransaction = (row: any) => {
@@ -273,17 +288,25 @@ export default function OnboardingPage() {
 
       const cat = inferCategory(row);
       const absoluteAmt = Math.abs(tx.amt);
+      const month = getMonthLabel(row);
+      const sortKey = getMonthSortKey(row);
+
+      if (!monthlyBuckets[month]) {
+        monthlyBuckets[month] = { revenue: 0, expenses: 0, sortKey };
+      }
 
       if (tx.isExpense) {
         expenseRows += 1;
         totalExpenses += absoluteAmt;
         expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
+        monthlyBuckets[month].expenses += absoluteAmt;
 
         if (!categoryRows[cat]) categoryRows[cat] = [];
         categoryRows[cat].push(absoluteAmt);
       } else {
         revenueRows += 1;
         totalRevenue += absoluteAmt;
+        monthlyBuckets[month].revenue += absoluteAmt;
       }
     });
 
@@ -334,6 +357,20 @@ export default function OnboardingPage() {
       ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100)
       : 0;
 
+    const history = Object.entries(monthlyBuckets)
+      .map(([month, v]) => ({ month, revenue: Math.round(v.revenue * 100) / 100, expenses: Math.round(v.expenses * 100) / 100, sortKey: v.sortKey }))
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .slice(-6)
+      .map(({ sortKey, ...rest }) => rest);
+
+    const avgMonthlyExpenses = history.length > 0
+      ? history.reduce((acc, h) => acc + (h.expenses || 0), 0) / history.length
+      : totalExpenses;
+    const inferredCashOnHand = totalRevenue * 0.35;
+    const runway = avgMonthlyExpenses > 0
+      ? Math.round((inferredCashOnHand / avgMonthlyExpenses) * 10) / 10
+      : 0;
+
     let auditWarning = "";
     if (revenueRows > 0 && expenseRows === 0) {
       auditWarning = "Revenue-only dataset detected. Upload bank/P&L expenses for accurate leak findings and margin.";
@@ -346,6 +383,8 @@ export default function OnboardingPage() {
       revenue: totalRevenue,
       expenses: totalExpenses,
       margin: computedMargin,
+      runway,
+      history,
       warning: auditWarning,
       dataQuality: {
         revenueRows,

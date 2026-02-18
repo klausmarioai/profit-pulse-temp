@@ -21,13 +21,17 @@ export default function DashboardPage() {
   // Merge audit data with mock for a full dashboard feel
   const currentSummary = auditData ? {
     ...mockFinancials.summary,
-    revenue: auditData.revenue || mockFinancials.summary.revenue,
-    expenses: auditData.expenses || mockFinancials.summary.expenses,
-    profit: (auditData.revenue || mockFinancials.summary.revenue) - (auditData.expenses || mockFinancials.summary.expenses),
-    margin: auditData.margin || mockFinancials.summary.margin
+    revenue: typeof auditData.revenue === 'number' ? auditData.revenue : mockFinancials.summary.revenue,
+    expenses: typeof auditData.expenses === 'number' ? auditData.expenses : mockFinancials.summary.expenses,
+    profit: (typeof auditData.revenue === 'number' ? auditData.revenue : mockFinancials.summary.revenue) - (typeof auditData.expenses === 'number' ? auditData.expenses : mockFinancials.summary.expenses),
+    margin: typeof auditData.margin === 'number' ? auditData.margin : mockFinancials.summary.margin,
+    runway: typeof auditData.runway === 'number' ? auditData.runway : mockFinancials.summary.runway
   } : mockFinancials.summary;
 
   const currentLeaks = (auditData && auditData.leaks) ? auditData.leaks : mockFinancials.leaks;
+  const currentHistory = (auditData && Array.isArray(auditData.history) && auditData.history.length > 0)
+    ? auditData.history
+    : mockFinancials.history;
   const totalSavings = currentLeaks.reduce((acc: number, leak: any) => acc + (leak.impact || 0), 0);
 
   return (
@@ -115,7 +119,7 @@ export default function DashboardPage() {
             <CardContent>
               <div className="h-[300px] w-full mt-4">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={mockFinancials.history}>
+                  <AreaChart data={currentHistory}>
                     <defs><linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3}/><stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: 'hsl(var(--muted-foreground))', fontSize: 12}} />
