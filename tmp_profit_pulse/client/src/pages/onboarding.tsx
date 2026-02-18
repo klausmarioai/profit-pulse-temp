@@ -36,6 +36,7 @@ export default function OnboardingPage() {
     debit: "",
     category: ""
   });
+  const NONE_VALUE = "__none__";
 
   const handleFinish = (auditData?: any) => {
     if (auditData) {
@@ -483,9 +484,10 @@ export default function OnboardingPage() {
                             <div key={field.id} className="space-y-1.5">
                               <label className="text-[10px] font-bold uppercase text-muted-foreground">{field.label}</label>
                               <Select 
-                                value={mappings[field.id]} 
+                                value={mappings[field.id] || ((field.id === 'category' || field.id === 'description' || field.id === 'credit' || field.id === 'debit') ? NONE_VALUE : "")}
                                 onValueChange={(val) => {
-                                  const newMappings = {...mappings, [field.id]: val};
+                                  const normalizedVal = val === NONE_VALUE ? "" : val;
+                                  const newMappings = {...mappings, [field.id]: normalizedVal};
                                   setMappings(newMappings);
                                   setConfidence(calculateConfidence(newMappings));
                                   setIsPresetApplied(false);
@@ -495,7 +497,7 @@ export default function OnboardingPage() {
                                   <SelectValue placeholder="Select header" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {(field.id === 'category' || field.id === 'description' || field.id === 'credit' || field.id === 'debit') && <SelectItem value="">None</SelectItem>}
+                                  {(field.id === 'category' || field.id === 'description' || field.id === 'credit' || field.id === 'debit') && <SelectItem value={NONE_VALUE}>None</SelectItem>}
                                   {headers.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
                                 </SelectContent>
                               </Select>
