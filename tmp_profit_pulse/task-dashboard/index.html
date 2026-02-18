@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Klaus Work Dashboard</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#121a31; --panel-2:#0f1730; --line:#27345d;
+      --text:#edf2ff; --muted:#9fb0d4; --ok:#2fbf71; --warn:#f5a524; --bad:#ef5350; --info:#5b8cff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
+    .wrap{max-width:1320px;margin:0 auto;padding:20px}
+    .top{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+    h1{margin:0;font-size:28px}
+    .sub{color:var(--muted);margin-top:6px}
+    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #33406d;border-radius:999px;padding:4px 10px;font-size:12px;color:#c7d4f7;background:#0f1730}
+
+    .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+    .k{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .v{font-size:24px;font-weight:700}
+    .v.ok{color:var(--ok)} .v.warn{color:var(--warn)} .v.bad{color:var(--bad)} .v.info{color:var(--info)}
+
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    input,select,button,textarea{border-radius:10px;border:1px solid #2a355f;background:#0f1730;color:var(--text);padding:10px}
+    input,select{min-height:40px}
+    button{cursor:pointer}
+    .grow{flex:1;min-width:220px}
+
+    .layout{display:grid;grid-template-columns:2fr 1fr;gap:12px}
+    .board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+    .col{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;min-height:420px}
+    .col h3{margin:0 0 8px;font-size:15px}
+    .h-now{color:var(--warn)} .h-next{color:var(--info)} .h-blocked{color:var(--bad)} .h-done{color:var(--ok)}
+
+    .task{background:var(--panel-2);border:1px solid #2a355f;border-radius:12px;padding:10px;margin-bottom:8px}
+    .title{font-weight:600;margin-bottom:6px;line-height:1.25}
+    .meta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+    .mini{font-size:11px;padding:5px 8px}
+    .row{display:flex;gap:6px;flex-wrap:wrap}
+    .prio-high{color:#ffb4b4;border-color:#6f2f2f}
+    .prio-medium{color:#ffdca8;border-color:#6f5731}
+    .prio-low{color:#b7d5ff;border-color:#345188}
+
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+    .panel h3{margin:0 0 10px;font-size:16px}
+    .project{margin-bottom:10px}
+    .bar{height:8px;background:#0f1730;border:1px solid #2a355f;border-radius:999px;overflow:hidden}
+    .fill{height:100%;background:linear-gradient(90deg,#5b8cff,#2fbf71)}
+    .small{font-size:12px;color:var(--muted)}
+
+    @media (max-width: 1100px){
+      .layout{grid-template-columns:1fr}
+      .board{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media (max-width: 680px){
+      .board{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1>Mario Work Dashboard</h1>
+        <div class="sub">Clear view of what we’re working on right now, what’s next, and what’s blocked.</div>
+      </div>
+      <div class="pill" id="syncStatus">local only</div>
+    </div>
+
+    <div class="stats">
+      <div class="card"><div class="k">Total tasks</div><div class="v" id="sTotal">0</div></div>
+      <div class="card"><div class="k">In progress now</div><div class="v warn" id="sDoing">0</div></div>
+      <div class="card"><div class="k">Blocked</div><div class="v bad" id="sBlocked">0</div></div>
+      <div class="card"><div class="k">Done this week</div><div class="v ok" id="sDoneWeek">0</div></div>
+      <div class="card"><div class="k">Active projects</div><div class="v info" id="sProjects">0</div></div>
+    </div>
+
+    <div class="toolbar">
+      <input id="newTitle" class="grow" placeholder="Add task (ex: Wire real CSV parsing to dashboard findings)" />
+      <select id="newProject">
+        <option value="website">Website</option>
+        <option value="app">App</option>
+        <option value="habits">Habits</option>
+        <option value="qa-career">QA Career</option>
+        <option value="ops">Ops</option>
+      </select>
+      <select id="newOwner">
+        <option value="klaus">Klaus</option>
+        <option value="main">main</option>
+        <option value="shield">shield</option>
+      </select>
+      <select id="newPriority">
+        <option value="high">High</option>
+        <option value="medium" selected>Medium</option>
+        <option value="low">Low</option>
+      </select>
+      <button onclick="addTask()">Add</button>
+      <button onclick="fetchLiveNow()">Sync</button>
+      <button onclick="publishLiveNow()">Publish</button>
+      <button onclick="exportTasks()">Export</button>
+      <input id="import" type="file" accept="application/json" onchange="importTasks(event)" />
+    </div>
+
+    <div class="toolbar" style="margin-top:-4px;">
+      <input id="q" class="grow" placeholder="Filter by keyword..." oninput="render()" />
+      <select id="fProject" onchange="render()">
+        <option value="">All projects</option>
+        <option value="website">Website</option>
+        <option value="app">App</option>
+        <option value="habits">Habits</option>
+        <option value="qa-career">QA Career</option>
+        <option value="ops">Ops</option>
+      </select>
+      <select id="fOwner" onchange="render()">
+        <option value="">All owners</option>
+        <option value="klaus">Klaus</option>
+        <option value="main">main</option>
+        <option value="shield">shield</option>
+      </select>
+    </div>
+
+    <div class="layout">
+      <div class="board">
+        <div class="col"><h3 class="h-now">Now</h3><div id="cDoing"></div></div>
+        <div class="col"><h3 class="h-next">Next</h3><div id="cTodo"></div></div>
+        <div class="col"><h3 class="h-blocked">Blocked</h3><div id="cBlocked"></div></div>
+        <div class="col"><h3 class="h-done">Done</h3><div id="cDone"></div></div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <h3>Project Progress</h3>
+          <div id="projectProgress"></div>
+        </div>
+        <div class="panel">
+          <h3>Live Agent Activity</h3>
+          <div id="liveFeed" class="small">Waiting for live stream...</div>
+        </div>
+        <div class="panel">
+          <h3>How to use this</h3>
+          <div class="small">
+            1) Put active work in <b>Now</b><br/>
+            2) Keep the next queue in <b>Next</b><br/>
+            3) Anything waiting on credits/approval goes to <b>Blocked</b><br/>
+            4) Keep cards short and outcome-focused<br/>
+            5) Hit <b>Publish</b> to save current board to <code>tasks-live.json</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const KEY = 'klaus.work.dashboard.v2';
+
+const seed = [
+  { id: crypto.randomUUID(), title:'Finish real CSV parsing wiring in app onboarding', project:'app', owner:'klaus', priority:'high', status:'blocked', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() },
+  { id: crypto.randomUUID(), title:'Website CTA + UTM capture verification once credits reset', project:'website', owner:'klaus', priority:'high', status:'blocked', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() },
+  { id: crypto.randomUUID(), title:'Keep habits reminders clean (no Shield wording)', project:'habits', owner:'main', priority:'medium', status:'done', createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() }
+];
+
+let tasks = load();
+render();
+connectLive();
+
+function load(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(raw) return JSON.parse(raw);
+    // migrate older format if found
+    const old = localStorage.getItem('klaus.tasks.v1');
+    if(old){
+      const arr = JSON.parse(old);
+      return arr.map(t => ({
+        id: t.id || crypto.randomUUID(),
+        title: t.title,
+        project: mapAgentToProject(t.agent),
+        owner: t.agent || 'main',
+        priority: 'medium',
+        status: mapStatus(t.status),
+        createdAt: t.createdAt || new Date().toISOString(),
+        updatedAt: t.createdAt || new Date().toISOString()
+      }));
+    }
+    return seed;
+  }catch{return seed}
+}
+
+function save(){ localStorage.setItem(KEY, JSON.stringify(tasks)); }
+function mapStatus(s){ return s==='in-progress' ? 'doing' : (s==='todo'?'todo':(s==='done'?'done':'todo')); }
+function mapAgentToProject(a){
+  if(a==='ffwm') return 'website';
+  if(a==='habit') return 'habits';
+  if(a==='qa') return 'qa-career';
+  if(a==='shield') return 'ops';
+  return 'app';
+}
+function mapProjectToAgent(p){
+  if(p==='website') return 'ffwm';
+  if(p==='habits') return 'habit';
+  if(p==='qa-career') return 'qa';
+  if(p==='ops') return 'shield';
+  return 'main';
+}
+
+function addTask(){
+  const title = document.getElementById('newTitle').value.trim();
+  if(!title) return;
+  const task = {
+    id: crypto.randomUUID(),
+    title,
+    project: document.getElementById('newProject').value,
+    owner: document.getElementById('newOwner').value,
+    priority: document.getElementById('newPriority').value,
+    status: 'todo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  tasks.unshift(task);
+  document.getElementById('newTitle').value='';
+  save(); render();
+}
+
+function setStatus(id, status){
+  tasks = tasks.map(t => t.id===id ? {...t, status, updatedAt:new Date().toISOString()} : t);
+  save(); render();
+}
+function setPriority(id, priority){
+  tasks = tasks.map(t => t.id===id ? {...t, priority, updatedAt:new Date().toISOString()} : t);
+  save(); render();
+}
+function removeTask(id){
+  if(!confirm('Delete this task?')) return;
+  tasks = tasks.filter(t => t.id!==id);
+  save(); render();
+}
+
+function filtered(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const fp = document.getElementById('fProject').value;
+  const fo = document.getElementById('fOwner').value;
+  return tasks.filter(t => {
+    if(fp && t.project!==fp) return false;
+    if(fo && t.owner!==fo) return false;
+    if(q && !(t.title||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function render(){
+  const list = filtered();
+  const by = status => list.filter(t => t.status===status).sort((a,b) => new Date(b.updatedAt)-new Date(a.updatedAt));
+  document.getElementById('cDoing').innerHTML = by('doing').map(taskCard).join('') || empty('No active tasks');
+  document.getElementById('cTodo').innerHTML = by('todo').map(taskCard).join('') || empty('No queued tasks');
+  document.getElementById('cBlocked').innerHTML = by('blocked').map(taskCard).join('') || empty('Nothing blocked');
+  document.getElementById('cDone').innerHTML = by('done').map(taskCard).join('') || empty('Nothing completed yet');
+
+  renderStats(list);
+  renderProjectProgress(list);
+}
+
+function empty(msg){ return `<div class="small">${msg}</div>`; }
+
+function taskCard(t){
+  return `<div class="task">
+    <div class="title">${escapeHtml(t.title)}</div>
+    <div class="meta">
+      <span class="pill">${escapeHtml(t.project)}</span>
+      <span class="pill">${escapeHtml(t.owner)}</span>
+      <span class="pill prio-${t.priority}">${escapeHtml(t.priority)}</span>
+    </div>
+    <div class="row" style="margin-bottom:6px">
+      ${t.status!=='doing' ? `<button class='mini' onclick="setStatus('${t.id}','doing')">Now</button>`:''}
+      ${t.status!=='todo' ? `<button class='mini' onclick="setStatus('${t.id}','todo')">Next</button>`:''}
+      ${t.status!=='blocked' ? `<button class='mini' onclick="setStatus('${t.id}','blocked')">Blocked</button>`:''}
+      ${t.status!=='done' ? `<button class='mini' onclick="setStatus('${t.id}','done')">Done</button>`:''}
+    </div>
+    <div class="row">
+      ${priorityBtn(t,'high')}${priorityBtn(t,'medium')}${priorityBtn(t,'low')}
+      <button class='mini' onclick="removeTask('${t.id}')">Delete</button>
+    </div>
+    <div class="small" style="margin-top:6px">Updated ${fmt(t.updatedAt)}</div>
+  </div>`;
+}
+function priorityBtn(t,p){ return t.priority===p ? '' : `<button class='mini' onclick="setPriority('${t.id}','${p}')">${p}</button>`; }
+
+function renderStats(list){
+  const now = new Date();
+  const weekAgo = new Date(now); weekAgo.setDate(now.getDate()-7);
+  const doneWeek = list.filter(t => t.status==='done' && new Date(t.updatedAt)>=weekAgo).length;
+  const activeProjects = new Set(list.map(t=>t.project)).size;
+  document.getElementById('sTotal').textContent = list.length;
+  document.getElementById('sDoing').textContent = list.filter(t=>t.status==='doing').length;
+  document.getElementById('sBlocked').textContent = list.filter(t=>t.status==='blocked').length;
+  document.getElementById('sDoneWeek').textContent = doneWeek;
+  document.getElementById('sProjects').textContent = activeProjects;
+}
+
+function renderProjectProgress(list){
+  const groups = {};
+  for(const t of list){
+    groups[t.project] ||= {total:0, done:0, doing:0, blocked:0};
+    groups[t.project].total++;
+    if(t.status==='done') groups[t.project].done++;
+    if(t.status==='doing') groups[t.project].doing++;
+    if(t.status==='blocked') groups[t.project].blocked++;
+  }
+  const html = Object.entries(groups)
+    .sort((a,b)=>b[1].total-a[1].total)
+    .map(([project,g]) => {
+      const pct = g.total ? Math.round((g.done/g.total)*100) : 0;
+      return `<div class="project">
+        <div class="small" style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span><b>${escapeHtml(project)}</b> · ${g.done}/${g.total} done</span>
+          <span>${pct}%</span>
+        </div>
+        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="small" style="margin-top:3px">Now: ${g.doing} · Blocked: ${g.blocked}</div>
+      </div>`;
+    }).join('');
+  document.getElementById('projectProgress').innerHTML = html || '<div class="small">No project data yet.</div>';
+}
+
+async function fetchLiveNow(){
+  const el = document.getElementById('syncStatus');
+  try{
+    const res = await fetch(`/api/live?t=${Date.now()}`);
+    if(!res.ok) throw new Error();
+    const payload = await res.json();
+    const added = applyLiveTasks(payload.tasks||[]);
+    renderLiveFeed(payload.sessions||[]);
+    el.textContent = `live synced (+${added})`;
+  }catch{
+    el.textContent = 'live unavailable';
+  }
+}
+
+async function publishLiveNow(){
+  const el = document.getElementById('syncStatus');
+  try{
+    const payload = tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      agent: mapProjectToAgent(t.project),
+      status: t.status === 'doing' ? 'in-progress' : t.status,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    }));
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks: payload })
+    });
+    if(!res.ok) throw new Error();
+    const out = await res.json();
+    el.textContent = `published (${out.count||0})`;
+  }catch{
+    el.textContent = 'publish failed';
+  }
+}
+
+function connectLive(){
+  fetchLiveNow();
+  const el = document.getElementById('syncStatus');
+  try{
+    const es = new EventSource('/events');
+    es.onmessage = (evt)=>{
+      try{
+        const payload = JSON.parse(evt.data);
+        const added = applyLiveTasks(payload.tasks||[]);
+        renderLiveFeed(payload.sessions||[]);
+        el.textContent = `live auto-sync (+${added})`;
+      }catch{}
+    };
+    es.onerror = ()=>{ el.textContent = 'live reconnecting...'; };
+  }catch{
+    el.textContent = 'live stream unsupported';
+  }
+}
+
+function applyLiveTasks(incoming){
+  const existing = new Set(tasks.map(t => `${(t.title||'').toLowerCase()}::${t.project}`));
+  let added = 0;
+  for(const t of incoming){
+    const title = (t.title||'').trim();
+    if(!title) continue;
+    const project = mapAgentToProject(t.agent || 'main');
+    const key = `${title.toLowerCase()}::${project}`;
+    if(existing.has(key)) continue;
+    tasks.unshift({
+      id: crypto.randomUUID(),
+      title,
+      project,
+      owner: t.agent || 'main',
+      priority:'medium',
+      status: mapStatus(t.status || 'todo'),
+      createdAt: t.createdAt || new Date().toISOString(),
+      updatedAt: t.createdAt || new Date().toISOString()
+    });
+    existing.add(key);
+    added++;
+  }
+  if(added){ save(); render(); }
+  return added;
+}
+
+function renderLiveFeed(sessions){
+  const feed = document.getElementById('liveFeed');
+  if(!sessions.length){ feed.textContent = 'No recent sessions.'; return; }
+  feed.innerHTML = sessions.slice(0,10).map(s=>{
+    const mins = Math.max(0, Math.round((s.ageMs||0)/60000));
+    return `• <span class="pill">${escapeHtml(s.key||'session')}</span> ${escapeHtml(s.model||'')} · ${mins}m ago`;
+  }).join('<br/>');
+}
+
+function exportTasks(){
+  const blob = new Blob([JSON.stringify(tasks, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'mario-work-dashboard.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importTasks(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const fr = new FileReader();
+  fr.onload = ()=>{
+    try{
+      const incoming = JSON.parse(fr.result);
+      if(!Array.isArray(incoming)) throw new Error('bad');
+      tasks = incoming;
+      save(); render();
+    }catch{ alert('Invalid JSON file'); }
+  };
+  fr.readAsText(file);
+}
+
+function fmt(iso){
+  try{ return new Date(iso).toLocaleString(); }catch{ return ''; }
+}
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+</script>
+</body>
+</html>
