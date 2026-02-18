@@ -211,6 +211,8 @@ export default function OnboardingPage() {
     const expensesByCategory: Record<string, number> = {};
     let totalRevenue = 0;
     let totalExpenses = 0;
+    let revenueRows = 0;
+    let expenseRows = 0;
 
     const parseMoney = (val: any) => {
       const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
@@ -272,12 +274,14 @@ export default function OnboardingPage() {
       const absoluteAmt = Math.abs(tx.amt);
 
       if (tx.isExpense) {
+        expenseRows += 1;
         totalExpenses += absoluteAmt;
         expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
 
         if (!categoryRows[cat]) categoryRows[cat] = [];
         categoryRows[cat].push(absoluteAmt);
       } else {
+        revenueRows += 1;
         totalRevenue += absoluteAmt;
       }
     });
@@ -329,11 +333,24 @@ export default function OnboardingPage() {
       ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100)
       : 0;
 
+    let auditWarning = "";
+    if (revenueRows > 0 && expenseRows === 0) {
+      auditWarning = "Revenue-only dataset detected. Upload bank/P&L expenses for accurate leak findings and margin.";
+    } else if (expenseRows > 0 && revenueRows === 0) {
+      auditWarning = "Expense-only dataset detected. Upload revenue data for accurate margin and full audit insights.";
+    }
+
     handleFinish({
       leaks: leaks,
       revenue: totalRevenue,
       expenses: totalExpenses,
-      margin: computedMargin
+      margin: computedMargin,
+      warning: auditWarning,
+      dataQuality: {
+        revenueRows,
+        expenseRows,
+        totalRows: revenueRows + expenseRows
+      }
     });
   };
 
