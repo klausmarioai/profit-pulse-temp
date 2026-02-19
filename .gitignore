@@ -1,13 +1,11 @@
 node_modules
-dist
+dist/
 .DS_Store
 server/public
 vite.config.ts.*
 *.tar.gz
+
 # temp archives / exports
 *.zip
 tmp_*/
 tmp/
-
-# local build output
-dist/
