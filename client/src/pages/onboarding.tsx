@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Upload, TrendingUp, ShieldCheck, Check, AlertCircle, Loader2, Info, RotateCcw } from "lucide-react";
+import { Upload, TrendingUp, ShieldCheck, AlertCircle, Loader2, Info, RotateCcw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Papa from "papaparse";
+import { saveAuditData } from "@/lib/audit-storage";
 
-const NONE_VALUE = "__none__";
+const ONBOARDING_DRAFT_KEY = "profitPulseOnboardingDraft.v1";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -29,34 +30,100 @@ export default function OnboardingPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [confidence, setConfidence] = useState({ level: "Low", score: 0 });
   const [isPresetApplied, setIsPresetApplied] = useState(false);
+  const PRESET_KEY = "profitPulseMappingPreset";
   const [mappings, setMappings] = useState<Record<string, string>>({
     date: "",
     description: "",
     amount: "",
+    credit: "",
+    debit: "",
     category: ""
   });
+  const NONE_VALUE = "__none__";
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ONBOARDING_DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.step === "number") setStep(parsed.step);
+      if (parsed?.formData) {
+        setFormData((prev) => ({ ...prev, ...parsed.formData }));
+      }
+    } catch {
+      localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify({ step, formData, updatedAt: new Date().toISOString() }));
+  }, [step, formData]);
 
   const handleFinish = (auditData?: any) => {
-    if (auditData) {
-      localStorage.setItem("profitPulseAudit", JSON.stringify(auditData));
-    } else {
-      localStorage.removeItem("profitPulseAudit");
-    }
+    localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+    saveAuditData(auditData || null);
     setLocation("/dashboard");
   };
 
   const calculateConfidence = (m: Record<string, string>) => {
     let score = 0;
     if (m.date) score += 30;
-    if (m.amount) score += 40;
+    if (m.amount || (m.credit && m.debit)) score += 40;
     if (m.description) score += 20;
     if (m.category) score += 10;
-    
+
     let level = "Low";
     if (score >= 80) level = "High";
     else if (score >= 50) level = "Medium";
-    
+
     return { level, score };
+  };
+
+  const pickBestAmountHeader = (csvHeaders: string[]) => {
+    const scoreAmountHeader = (header: string) => {
+      const lower = header.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      let score = 0;
+
+      if (/\b(total amount|transaction amount|amount)\b/.test(lower)) score += 120;
+      if (/\btotal\b/.test(lower)) score += 90;
+      if (/\b(value|cost|price)\b/.test(lower)) score += 25;
+
+      // Strong penalties for per-unit fields that often cause false revenue-only audits
+      if (/\b(unit price|price per|quantity|qty|rate)\b/.test(lower)) score -= 90;
+
+      // Exclude obvious non-amount numeric columns
+      if (/\b(id|number|invoice|order|phone|zip)\b/.test(lower)) score -= 60;
+
+      return score;
+    };
+
+    return csvHeaders
+      .map((h) => ({ h, score: scoreAmountHeader(h) }))
+      .sort((a, b) => b.score - a.score)[0]?.h || "";
+  };
+
+  const detectMappingsFromHeaders = (csvHeaders: string[]) => {
+    const detected: Record<string, string> = {
+      date: "",
+      description: "",
+      amount: "",
+      credit: "",
+      debit: "",
+      category: ""
+    };
+
+    csvHeaders.forEach((h) => {
+      const lower = h.toLowerCase();
+      if (!detected.date && (lower.includes("date") || lower.includes("time") || lower.includes("posted"))) detected.date = h;
+      if (!detected.description && (lower.includes("desc") || lower.includes("memo") || lower.includes("detail") || lower.includes("name") || lower.includes("merchant"))) detected.description = h;
+      if (!detected.credit && (lower.includes("credit") || lower.includes("deposit") || lower.includes("income"))) detected.credit = h;
+      if (!detected.debit && (lower.includes("debit") || lower.includes("withdraw") || lower.includes("expense") || lower.includes("spend"))) detected.debit = h;
+      if (!detected.category && (lower.includes("cat") || lower.includes("type") || lower.includes("group") || lower.includes("class"))) detected.category = h;
+    });
+
+    detected.amount = pickBestAmountHeader(csvHeaders);
+
+    return detected;
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,6 +139,7 @@ export default function OnboardingPage() {
     setFileName(file.name);
     setUploadState('uploading');
     setError("");
+    setIsPresetApplied(false);
 
     Papa.parse(file, {
       header: true,
@@ -91,40 +159,43 @@ export default function OnboardingPage() {
 
         const csvHeaders = results.meta.fields || [];
         setHeaders(csvHeaders);
-        
-        const savedPreset = localStorage.getItem("profitPulseMappingPreset");
-        let detectedMappings: Record<string, string> = {
-          date: "",
-          description: "",
-          amount: "",
-          category: ""
-        };
 
-        if (savedPreset) {
-          const preset = JSON.parse(savedPreset);
-          const hasMatch = Object.values(preset.mappings).some(h => csvHeaders.includes(h as string));
-          if (hasMatch) {
-            detectedMappings = { ...preset.mappings };
-            setIsPresetApplied(true);
+        const autoDetected = detectMappingsFromHeaders(csvHeaders);
+        let detectedMappings = { ...autoDetected };
+
+        const savedPresetRaw = localStorage.getItem(PRESET_KEY);
+        if (savedPresetRaw) {
+          try {
+            const preset = JSON.parse(savedPresetRaw);
+            const presetMappings = preset?.mappings || {};
+            const presetHeaders = Object.values(presetMappings).filter(Boolean) as string[];
+            const overlap = presetHeaders.filter((h) => csvHeaders.includes(h)).length;
+            const similarity = presetHeaders.length ? overlap / presetHeaders.length : 0;
+
+            if (similarity >= 0.5) {
+              detectedMappings = {
+                ...detectedMappings,
+                ...presetMappings,
+              };
+              setIsPresetApplied(true);
+            }
+          } catch {
+            localStorage.removeItem(PRESET_KEY);
           }
         }
 
-        if (!isPresetApplied) {
-          csvHeaders.forEach(h => {
-            const lower = h.toLowerCase();
-            if (!detectedMappings.date && (lower.includes('date') || lower.includes('time'))) detectedMappings.date = h;
-            if (!detectedMappings.description && (lower.includes('desc') || lower.includes('memo') || lower.includes('detail') || lower.includes('name'))) detectedMappings.description = h;
-            if (!detectedMappings.amount && (lower.includes('amount') || lower.includes('val') || lower.includes('price') || lower.includes('cost'))) detectedMappings.amount = h;
-            if (!detectedMappings.category && (lower.includes('cat') || lower.includes('type') || lower.includes('group'))) detectedMappings.category = h;
-          });
+        // Guardrail: if preset picked a weak amount header (e.g., Unit_Price), prefer stronger match
+        const bestAmountHeader = pickBestAmountHeader(csvHeaders);
+        if (bestAmountHeader) {
+          detectedMappings.amount = bestAmountHeader;
         }
 
         const conf = calculateConfidence(detectedMappings);
         setConfidence(conf);
-        setParsedData(results.data);
+        setParsedData(results.data as any[]);
         setMappings(detectedMappings);
-        
-        setTimeout(() => setUploadState('mapping'), 1000);
+
+        setTimeout(() => setUploadState('mapping'), 800);
       },
       error: (err) => {
         setError(`Error parsing file: ${err.message}`);
@@ -134,100 +205,227 @@ export default function OnboardingPage() {
   };
 
   const resetMappings = () => {
-    localStorage.removeItem("profitPulseMappingPreset");
+    localStorage.removeItem(PRESET_KEY);
     setIsPresetApplied(false);
-    setMappings({ date: "", description: "", amount: "", category: "" });
+    setMappings({ date: "", description: "", amount: "", credit: "", debit: "", category: "" });
     setConfidence({ level: "Low", score: 0 });
   };
 
   const generateAudit = () => {
-    if (!mappings.amount || !mappings.date) {
-      setError("Please map at least the Date and Amount columns.");
+    const hasAmount = Boolean(mappings.amount);
+    const hasCreditDebit = Boolean(mappings.credit && mappings.debit);
+
+    if (!mappings.date || (!hasAmount && !hasCreditDebit)) {
+      setError("Please map Date and either Amount OR both Credit + Debit columns.");
       return;
     }
 
-    localStorage.setItem("profitPulseMappingPreset", JSON.stringify({
+    if (!parsedData.length) {
+      setError("No parsed rows found. Please upload a valid CSV and try again.");
+      return;
+    }
+
+    const selected = [mappings.date, mappings.description, mappings.amount, mappings.credit, mappings.debit, mappings.category].filter(Boolean);
+    const duplicates = selected.filter((h, i) => selected.indexOf(h) !== i);
+    if (duplicates.length > 0) {
+      setError(`A column is mapped more than once (${Array.from(new Set(duplicates)).join(", ")}). Please assign unique columns.`);
+      return;
+    }
+
+    // Save preset
+    localStorage.setItem(PRESET_KEY, JSON.stringify({
       mappings,
+      headers,
       timestamp: Date.now()
     }));
 
     const expensesByCategory: Record<string, number> = {};
-    const historyMap: Record<string, { revenue: number, expenses: number }> = {};
     let totalRevenue = 0;
     let totalExpenses = 0;
     let revenueRows = 0;
     let expenseRows = 0;
+    const monthlyBuckets: Record<string, { revenue: number; expenses: number; sortKey: number }> = {};
 
-    parsedData.forEach(row => {
-      let amtStr = String(row[mappings.amount] || "0").replace(/[$,]/g, '');
-      let amt = parseFloat(amtStr);
-      if (isNaN(amt)) return;
+    const parseMoney = (val: any) => {
+      const n = parseFloat(String(val ?? "0").replace(/[$,]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    };
 
-      const dateStr = String(row[mappings.date] || "");
-      const date = new Date(dateStr);
-      const monthKey = !isNaN(date.getTime()) 
-        ? date.toLocaleString('default', { month: 'short' }) 
-        : "Unknown";
+    const inferCategory = (row: any) => {
+      return row[mappings.category] || row[mappings.description] || "Uncategorized";
+    };
 
-      if (!historyMap[monthKey]) {
-        historyMap[monthKey] = { revenue: 0, expenses: 0 };
+    const getMonthLabel = (row: any) => {
+      const rawDate = row[mappings.date];
+      const d = rawDate ? new Date(rawDate) : null;
+      if (!d || Number.isNaN(d.getTime())) return "Unknown";
+      return d.toLocaleString("en-US", { month: "short" });
+    };
+
+    const getMonthSortKey = (row: any) => {
+      const rawDate = row[mappings.date];
+      const d = rawDate ? new Date(rawDate) : null;
+      if (!d || Number.isNaN(d.getTime())) return Number.MAX_SAFE_INTEGER;
+      return d.getFullYear() * 100 + (d.getMonth() + 1);
+    };
+
+    const classifyTransaction = (row: any) => {
+      let amt = 0;
+      let credit = 0;
+      let debit = 0;
+
+      if (hasAmount) {
+        amt = parseMoney(row[mappings.amount]);
+      } else {
+        credit = parseMoney(row[mappings.credit]);
+        debit = parseMoney(row[mappings.debit]);
+        amt = credit - debit;
       }
 
-      const cat = row[mappings.category] || 'Uncategorized';
-      const isExpense = amt < 0 || (typeof cat === 'string' && /rent|pay|soft|tax|supply|vendor|utilit/i.test(cat));
-      
-      if (isExpense) {
-        const absoluteAmt = Math.abs(amt);
-        totalExpenses += absoluteAmt;
-        expenseRows++;
-        expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
-        historyMap[monthKey].expenses += absoluteAmt;
+      if (!Number.isFinite(amt) || amt === 0) return { valid: false as const, amt: 0, isExpense: false };
+
+      const cat = String(inferCategory(row) || "").toLowerCase();
+      const desc = String(row[mappings.description] || "").toLowerCase();
+      const text = `${cat} ${desc}`;
+
+      const incomeHint = /client payment|payout|deposit|income|sale|revenue|invoice paid|received/i.test(text);
+      const expenseHint = /expense|bill|fee|rent|utility|suppl|payroll|tax|insurance|subscription|software|vendor|purchase|withdraw/i.test(text);
+
+      let isExpense = false;
+
+      if (!hasAmount) {
+        // Credit/debit mapping is authoritative when provided
+        if (debit > 0 && credit === 0) isExpense = true;
+        else if (credit > 0 && debit === 0) isExpense = false;
+        else isExpense = amt < 0;
       } else {
-        totalRevenue += amt;
-        revenueRows++;
-        historyMap[monthKey].revenue += amt;
+        // Amount-column exports often encode sign directly; use hints only for positive ambiguous rows
+        if (amt < 0) isExpense = true;
+        else if (incomeHint) isExpense = false;
+        else if (expenseHint) isExpense = true;
+        else isExpense = false;
+      }
+
+      return { valid: true as const, amt, isExpense };
+    };
+
+    const categoryRows: Record<string, number[]> = {};
+    const totalRows = Math.max(parsedData.length, 1);
+
+    parsedData.forEach((row) => {
+      const tx = classifyTransaction(row);
+      if (!tx.valid) return;
+
+      const cat = inferCategory(row);
+      const absoluteAmt = Math.abs(tx.amt);
+      const month = getMonthLabel(row);
+      const sortKey = getMonthSortKey(row);
+
+      if (!monthlyBuckets[month]) {
+        monthlyBuckets[month] = { revenue: 0, expenses: 0, sortKey };
+      }
+
+      if (tx.isExpense) {
+        expenseRows += 1;
+        totalExpenses += absoluteAmt;
+        expensesByCategory[cat] = (expensesByCategory[cat] || 0) + absoluteAmt;
+        monthlyBuckets[month].expenses += absoluteAmt;
+
+        if (!categoryRows[cat]) categoryRows[cat] = [];
+        categoryRows[cat].push(absoluteAmt);
+      } else {
+        revenueRows += 1;
+        totalRevenue += absoluteAmt;
+        monthlyBuckets[month].revenue += absoluteAmt;
       }
     });
 
-    const history = Object.entries(historyMap)
-      .filter(([month]) => month !== "Unknown")
-      .map(([month, data]) => ({
-        month,
-        revenue: Math.round(data.revenue),
-        expenses: Math.round(data.expenses)
-      }));
-
-    let warning = "";
-    if (revenueRows > 0 && expenseRows === 0) {
-      warning = "Revenue-only dataset detected. Upload bank/P&L expenses for accurate leak findings and margin.";
-    } else if (expenseRows > 0 && revenueRows === 0) {
-      warning = "Expense-only dataset detected. Upload revenue data for accurate margin and full audit insights.";
+    if (revenueRows + expenseRows === 0) {
+      setError("No valid amount rows were found after mapping. Check amount/credit/debit columns and try again.");
+      return;
     }
 
-    const sortedCats = Object.entries(expensesByCategory).sort((a, b) => b[1] - a[1]);
-    const leaks = sortedCats.slice(0, 3).map(([name, total], idx) => {
-      const impact = Math.round(total * (0.1 + idx * 0.05));
-      return {
-        id: idx + 1,
-        name: `${name} Efficiency`,
-        impact: impact,
-        confidence: impact > 500 ? "High" : "Med",
-        description: `Potential leaks detected in ${name}. Benchmarks suggest a ${Math.round((impact/total)*100)}% saving opportunity.`,
-        action: `Audit ${name} recurring costs`
-      };
-    });
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
-    const avgMonthlyExpenses = totalExpenses / (Object.keys(historyMap).length || 1);
-    const runway = avgMonthlyExpenses > 0 ? Math.round((totalRevenue * 0.2) / avgMonthlyExpenses) : 6;
+    const leaks = Object.entries(expensesByCategory)
+      .map(([name, total], idx) => {
+        const rows = categoryRows[name] || [];
+        const txCount = rows.length;
+        const mean = txCount ? rows.reduce((a, b) => a + b, 0) / txCount : 0;
+        const variance = txCount
+          ? rows.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / txCount
+          : 0;
+        const stdDev = Math.sqrt(variance);
+
+        // Recurrence: how often this category appears in file
+        const recurrenceRatio = txCount / totalRows; // 0..1+
+        const recurrenceBoost = clamp(recurrenceRatio * 0.08, 0, 0.08); // up to +8%
+
+        // Volatility: unstable spend = more leak risk
+        const volatilityRatio = mean > 0 ? stdDev / mean : 0;
+        const volatilityBoost = clamp(volatilityRatio * 0.05, 0, 0.05); // up to +5%
+
+        // Baseline + risk boosts (consistent logic for all categories)
+        const baseRate = 0.10; // 10%
+        const savingsRate = clamp(baseRate + recurrenceBoost + volatilityBoost, 0.08, 0.23);
+
+        const impact = Math.round(total * savingsRate);
+
+        let confidence = "Low";
+        if (txCount >= 3 && total >= 800) confidence = "High";
+        else if (txCount >= 2 && total >= 300) confidence = "Med";
+
+        return {
+          id: idx + 1,
+          name: `${name} Efficiency`,
+          impact,
+          confidence,
+          description: `Potential leaks detected in ${name}.`,
+          breakdown: `How calculated: ${Math.round(baseRate * 100)}% base + ${Math.round(recurrenceBoost * 100)}% recurrence + ${Math.round(volatilityBoost * 100)}% volatility.`,
+          action: `Audit ${name} recurring costs`
+        };
+      })
+      .sort((a, b) => b.impact - a.impact)
+      .slice(0, 3);
+
+    const computedMargin = totalRevenue > 0
+      ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100)
+      : 0;
+
+    const history = Object.entries(monthlyBuckets)
+      .map(([month, v]) => ({ month, revenue: Math.round(v.revenue * 100) / 100, expenses: Math.round(v.expenses * 100) / 100, sortKey: v.sortKey }))
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .slice(-6)
+      .map(({ sortKey, ...rest }) => rest);
+
+    const avgMonthlyExpenses = history.length > 0
+      ? history.reduce((acc, h) => acc + (h.expenses || 0), 0) / history.length
+      : totalExpenses;
+    const inferredCashOnHand = totalRevenue * 0.35;
+    const runway = avgMonthlyExpenses > 0
+      ? Math.round((inferredCashOnHand / avgMonthlyExpenses) * 10) / 10
+      : 0;
+
+    let auditWarning = "";
+    if (revenueRows > 0 && expenseRows === 0) {
+      auditWarning = "Revenue-only dataset detected. Upload bank/P&L expenses for accurate leak findings and margin.";
+    } else if (expenseRows > 0 && revenueRows === 0) {
+      auditWarning = "Expense-only dataset detected. Upload revenue data for accurate margin and full audit insights.";
+    }
 
     handleFinish({
-      leaks: leaks.length > 0 ? leaks : null,
+      leaks: leaks,
       revenue: totalRevenue,
       expenses: totalExpenses,
-      margin: totalRevenue ? Math.round(((totalRevenue - totalExpenses) / totalRevenue) * 100) : 0,
-      warning,
-      runway: runway || 1,
-      history: history.length > 0 ? history : null
+      margin: computedMargin,
+      runway,
+      history,
+      warning: auditWarning,
+      dataQuality: {
+        revenueRows,
+        expenseRows,
+        totalRows: revenueRows + expenseRows
+      }
     });
   };
 
@@ -238,7 +436,7 @@ export default function OnboardingPage() {
           <div className="w-12 h-12 bg-primary rounded-xl mx-auto flex items-center justify-center text-primary-foreground mb-4 shadow-lg shadow-primary/20">
              <TrendingUp className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-bold font-heading text-foreground">ProfitPulse AI Setup</h1>
+          <h1 className="text-2xl font-bold font-heading">Setup Your Profit Audit</h1>
           <p className="text-muted-foreground mt-2">Find hidden leaks in &lt; 90 seconds.</p>
         </div>
 
@@ -246,11 +444,11 @@ export default function OnboardingPage() {
           <CardContent className="p-8">
             <AnimatePresence mode="wait">
               {step === 1 && (
-                <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                <motion.div key="s1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
                   <h2 className="text-xl font-semibold">Business Info</h2>
                   <div className="space-y-4">
-                    <Input placeholder="Agency Name" value={formData.businessName} onChange={(e) => setFormData({...formData, businessName: e.target.value})} />
-                    <Select onValueChange={(val) => setFormData({...formData, businessType: val})}>
+                    <Input placeholder="Business Name" value={formData.businessName} onChange={(e) => setFormData({...formData, businessName: e.target.value})} />
+                    <Select value={formData.businessType} onValueChange={(val) => setFormData({...formData, businessType: val})}>
                       <SelectTrigger><SelectValue placeholder="Business Type" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="hvac">HVAC / Trades</SelectItem>
@@ -260,7 +458,7 @@ export default function OnboardingPage() {
                         <SelectItem value="other">Other Service Business</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Select onValueChange={(val) => setFormData({...formData, revenueRange: val})}>
+                    <Select value={formData.revenueRange} onValueChange={(val) => setFormData({...formData, revenueRange: val})}>
                       <SelectTrigger><SelectValue placeholder="Monthly Revenue" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="lt20">&lt; $20k</SelectItem>
@@ -275,19 +473,19 @@ export default function OnboardingPage() {
               )}
 
               {step === 2 && (
-                <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                <motion.div key="s2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
                   <h2 className="text-xl font-semibold">Biggest Financial Stress?</h2>
                   <div className="space-y-2">
                     {["Cash Flow", "High Labor Costs", "Supply Prices", "Marketing ROI"].map(s => (
                       <Button key={s} variant={formData.stressPoint === s ? "default" : "outline"} className="w-full justify-start h-12" onClick={() => setFormData({...formData, stressPoint: s})}>{s}</Button>
                     ))}
                   </div>
-                  <div className="flex gap-2 pt-4"><Button variant="ghost" className="flex-1" onClick={() => setStep(1)}>Back</Button><Button className="flex-1" onClick={() => setStep(3)} disabled={!formData.stressPoint}>Next</Button></div>
+                  <div className="flex gap-2"><Button variant="ghost" className="flex-1" onClick={() => setStep(1)}>Back</Button><Button className="flex-1" onClick={() => setStep(3)} disabled={!formData.stressPoint}>Next</Button></div>
                 </motion.div>
               )}
 
               {step === 3 && (
-                <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 text-center">
+                <motion.div key="s3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6 text-center">
                   <h2 className="text-xl font-semibold">Connect Financials</h2>
                   
                   {uploadState === 'idle' || uploadState === 'error' ? (
@@ -321,6 +519,7 @@ export default function OnboardingPage() {
                     <div className="py-20 flex flex-col items-center justify-center space-y-4">
                       <Loader2 className="w-12 h-12 text-primary animate-spin" />
                       <p className="text-sm font-medium">Analyzing {fileName}...</p>
+                      <p className="text-xs text-muted-foreground">Normalizing amounts and mapping columns</p>
                     </div>
                   ) : (
                     <div className="space-y-6 text-left animate-in fade-in slide-in-from-bottom-2">
@@ -339,18 +538,27 @@ export default function OnboardingPage() {
                         )}
                       </div>
                       
+                      {confidence.level === "Low" && (
+                        <Alert variant="destructive" className="py-2">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription className="text-xs">Low confidence detected. Please confirm mappings before running audit.</AlertDescription>
+                        </Alert>
+                      )}
+
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-4">
                           {[
                             { id: 'date', label: 'Date Column' },
+                            { id: 'amount', label: 'Amount Column' },
+                            { id: 'credit', label: 'Credit (Opt)' },
+                            { id: 'debit', label: 'Debit (Opt)' },
                             { id: 'description', label: 'Description' },
-                            { id: 'amount', label: 'Amount' },
                             { id: 'category', label: 'Category (Opt)' }
                           ].map(field => (
                             <div key={field.id} className="space-y-1.5">
                               <label className="text-[10px] font-bold uppercase text-muted-foreground">{field.label}</label>
                               <Select 
-                                value={mappings[field.id] || ((field.id === 'category' || field.id === 'description' || field.id === 'credit' || field.id === 'debit') ? NONE_VALUE : "")} 
+                                value={mappings[field.id] || ((field.id === 'category' || field.id === 'description' || field.id === 'credit' || field.id === 'debit') ? NONE_VALUE : "")}
                                 onValueChange={(val) => {
                                   const normalizedVal = val === NONE_VALUE ? "" : val;
                                   const newMappings = {...mappings, [field.id]: normalizedVal};

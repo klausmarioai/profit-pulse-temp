@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { LayoutDashboard, MessageSquareText, FileText, Settings, Menu, X, LogOut, TrendingUp } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import avatarImage from "@/assets/ai-coach-avatar.png";
@@ -8,6 +8,18 @@ import avatarImage from "@/assets/ai-coach-avatar.png";
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+
+  useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   const navItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -20,11 +32,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-foreground flex font-sans">
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex flex-col w-64 border-r border-border/40 bg-card/50 backdrop-blur-xl fixed inset-y-0 z-50">
-        <div className="p-6 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
-            <TrendingUp className="w-5 h-5" />
+        <div className="p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <span className="text-lg font-bold font-heading tracking-tight">ProfitPulse AI</span>
           </div>
-          <span className="text-lg font-bold font-heading tracking-tight">ProfitPulse AI</span>
+          <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${isOnline ? "border-emerald-300 text-emerald-700 bg-emerald-50" : "border-red-300 text-red-700 bg-red-50"}`}>
+            {isOnline ? "Connected" : "Offline"}
+          </div>
         </div>
 
         <nav className="flex-1 px-4 space-y-1 mt-4">
@@ -72,6 +89,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <TrendingUp className="w-5 h-5" />
           </div>
           <span className="text-lg font-bold font-heading">ProfitPulse</span>
+          <span className={`ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold ${isOnline ? "border-emerald-300 text-emerald-700 bg-emerald-50" : "border-red-300 text-red-700 bg-red-50"}`}>
+            {isOnline ? "Connected" : "Offline"}
+          </span>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setIsMobileOpen(!isMobileOpen)}>
           {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
