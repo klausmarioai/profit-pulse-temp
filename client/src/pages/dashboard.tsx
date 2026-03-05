@@ -7,7 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Button } from "@/components/ui/button";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadAuditData } from "@/lib/audit-storage";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const [dailyCheckin, setDailyCheckin] = useState<DailyCheckin | null>(null);
   const [priorityDraft, setPriorityDraft] = useState("");
   const [weeklyReview, setWeeklyReview] = useState<WeeklyReview | null>(null);
+  const checkinCardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setAuditData(loadAuditData());
@@ -146,6 +147,16 @@ export default function DashboardPage() {
     return impact ? `${task} (+$${impact.toLocaleString()}/mo est.)` : task;
   };
 
+  const focusCheckinCard = () => {
+    const card = checkinCardRef.current;
+    if (!card) return;
+
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      card.focus();
+    }, 220);
+  };
+
   const addLeakFixToToday = (leak: Partial<LeakItem>) => {
     if (!dailyCheckin) return;
 
@@ -178,6 +189,7 @@ export default function DashboardPage() {
       title: "Added to Daily Check-in",
       description: taskText,
     });
+    focusCheckinCard();
   };
 
   return (
@@ -214,7 +226,7 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        <Card className="border-blue-200/70 bg-blue-50/40 dark:bg-blue-950/20 dark:border-blue-900">
+        <Card ref={checkinCardRef} tabIndex={-1} className="border-blue-200/70 bg-blue-50/40 dark:bg-blue-950/20 dark:border-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-400/60">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg font-bold flex items-center justify-between gap-3">
               <span className="flex items-center gap-2"><CalendarCheck2 className="w-5 h-5 text-blue-600" /> Daily Profit Check-in</span>
