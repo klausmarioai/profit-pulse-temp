@@ -1,6 +1,6 @@
 import Layout from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildReportModel, getDataCompletenessWarnings, type AuditData } from "@/lib/audit-derived";
+import { buildReportModel, getDataCompletenessWarnings, type AuditData, type LeakItem } from "@/lib/audit-derived";
 import { mockFinancials } from "@/lib/mock-data";
 import { DollarSign, Wallet, TrendingUp, PiggyBank, Info, CheckCircle, Zap, AlertTriangle, CalendarCheck2, ClipboardList } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { useEffect, useMemo, useState } from "react";
 import { loadAuditData } from "@/lib/audit-storage";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/hooks/use-toast";
 
 const CHECKIN_KEY = "profitpulse.daily.checkin.v1";
 const WEEKLY_REVIEW_KEY = "profitpulse.weekly.review.v1";
@@ -137,6 +138,46 @@ export default function DashboardPage() {
   const updateWeeklyReview = (field: "wins" | "misses" | "nextActions", value: string) => {
     if (!weeklyReview) return;
     setWeeklyReview({ ...weeklyReview, [field]: value, updatedAt: new Date().toISOString() });
+  };
+
+  const leakToTask = (leak: Partial<LeakItem>) => {
+    const task = leak.action || leak.name || "Fix top profit leak";
+    const impact = Math.max(0, Math.round(leak.impact || 0));
+    return impact ? `${task} (+$${impact.toLocaleString()}/mo est.)` : task;
+  };
+
+  const addLeakFixToToday = (leak: Partial<LeakItem>) => {
+    if (!dailyCheckin) return;
+
+    const taskText = leakToTask(leak);
+    const duplicate = dailyCheckin.priorities.some((p) => p.text.toLowerCase() === taskText.toLowerCase());
+    if (duplicate) {
+      toast({
+        title: "Already in today’s plan",
+        description: "That fix is already on your Daily Profit Check-in.",
+      });
+      return;
+    }
+
+    if (dailyCheckin.priorities.length >= 3) {
+      toast({
+        title: "Today’s list is full",
+        description: "Complete one item or reset today to add another fix.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDailyCheckin({
+      ...dailyCheckin,
+      priorities: [...dailyCheckin.priorities, { id: `${Date.now()}`, text: taskText, done: false }],
+      updatedAt: new Date().toISOString(),
+    });
+
+    toast({
+      title: "Added to Daily Check-in",
+      description: taskText,
+    });
   };
 
   return (
@@ -284,8 +325,12 @@ export default function DashboardPage() {
                       <p className="text-xs text-muted-foreground leading-relaxed">{leak.description || leak.reason}</p>
                       {leak.breakdown && <p className="text-[10px] text-muted-foreground/90 leading-relaxed">{leak.breakdown}</p>}
                     </div>
-                    <Button size="sm" className="w-full bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors h-9">
-                      {leak.action || leak.task || 'Fix this'}
+                    <Button
+                      size="sm"
+                      className="w-full bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors h-9"
+                      onClick={() => addLeakFixToToday(leak)}
+                    >
+                      Fix this
                     </Button>
                   </CardContent>
                 </Card>
