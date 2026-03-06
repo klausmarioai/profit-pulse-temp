@@ -3,8 +3,86 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Download, CheckCircle2, Zap, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { jsPDF } from "jspdf";
 
 export default function ReportsPage() {
+  const handleDownloadPdf = () => {
+    try {
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+      const left = 48;
+      let y = 56;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(22);
+      doc.text("ProfitPulse AI - Weekly Report", left, y);
+
+      y += 26;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(90, 90, 90);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, left, y);
+
+      y += 28;
+      doc.setTextColor(0, 0, 0);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("If you only do one thing this week", left, y);
+
+      y += 18;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      const priority = "Pause all supply orders for 14 days to burn through current overstock.";
+      const priorityLines = doc.splitTextToSize(priority, 500);
+      doc.text(priorityLines, left, y);
+      y += priorityLines.length * 14 + 20;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("Do this Monday", left, y);
+
+      y += 18;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      [
+        "+$420 Projected Profit - Switch Card Processor",
+        "+$1,200 Projected Profit - Optimize Technician Routes",
+        "+$310 Projected Profit - Adjust Utility Scheduling",
+      ].forEach((line) => {
+        doc.text(`- ${line}`, left, y);
+        y += 15;
+      });
+
+      y += 14;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("Key Metrics", left, y);
+
+      y += 18;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.text("- Profit Margin: 31.5%", left, y);
+      y += 15;
+      doc.text("- Cash Runway: 4.2 months", left, y);
+
+      y += 24;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("Coach's Weekly Note", left, y);
+
+      y += 18;
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(11);
+      const note = `You're doing great with labor efficiency, but inventory is sitting too long. Burn through your current stock before ordering more. That's $1k+ back in your pocket instantly.`;
+      const noteLines = doc.splitTextToSize(note, 500);
+      doc.text(noteLines, left, y);
+
+      doc.save("weekly-report.pdf");
+    } catch (error) {
+      console.error("PDF generation failed", error);
+      alert("Could not generate PDF. Please try again.");
+    }
+  };
+
   return (
     <Layout>
       <div className="space-y-8 max-w-5xl mx-auto font-sans">
@@ -16,7 +94,7 @@ export default function ReportsPage() {
             </div>
             <p className="text-muted-foreground">Prioritized profit plan for local businesses.</p>
           </div>
-          <Button><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
+          <Button onClick={handleDownloadPdf}><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
         </div>
 
         <div className="bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-200 dark:border-yellow-900/30 p-4 rounded-xl flex items-center gap-3">
